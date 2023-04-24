@@ -1,0 +1,109 @@
+#Full codas scripto turi veikti pilnai.
+
+import csv
+import re
+import time
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as FirefoxService
+
+
+def fetch_page(url):
+    service = FirefoxService(executable_path='/Users/(place)/Downloads/geckodriver')
+    driver = webdriver.Firefox(service=service)
+
+    driver.get(url)
+    time.sleep(5)  # Wait for the JavaScript to load
+    html = driver.page_source
+    driver.quit()
+    return html
+
+
+def parse_company_page(html, url):
+    soup = BeautifulSoup(html, 'html.parser')
+
+    company_name_element = soup.select_one('div.name.floatLeft h1.fn')
+    company_name = company_name_element.text.strip() if company_name_element else None
+
+    director_name_element = soup.select_one('tr:-soup-contains("Vadovas") td:nth-of-type(3)')
+    director_name = director_name_element.text.strip() if director_name_element else None
+
+    phone_number_element = soup.select_one('tr:has(td:contains("Telefonas")) td:nth-of-type(3) img')
+    phone_number = phone_number_element['alt'] if phone_number_element else None
+
+    website_element = soup.select_one('tr:has(td:contains("Tinklalapis")) td:nth-of-type(3) a')
+    website = website_element['href'] if website_element else None
+
+    if not website:
+        website_element = soup.select_one('a[href^="http"]:not([href*="rekvizitai"])')
+        website = website_element['href'] if website_element else None
+
+    employee_count_element = soup.select_one('tr:has(td:contains("Darbuotojai")) td:nth-of-type(3)')
+    employee_count_text = employee_count_element.text.strip() if employee_count_element else None
+    match = re.search(r'(\d+)', employee_count_text) if employee_count_text else None
+    employee_count = int(match.group(1)) if match else None
+
+    revenue_element = soup.select_one('tr:has(td:contains("Pardavimo pajamos")) td:nth-of-type(3)')
+    revenue_text = revenue_element.text.strip() if revenue_element else None
+    match = re.search(r'(\d[\d ]+)\s*€', revenue_text) if revenue_text else None
+    revenue_str = match.group(1) if match else None
+    revenue = f"{revenue_str} €" if revenue_str else None
+
+    return {
+        'company_name': company_name,
+        'director_name': director_name,
+        'phone_number': phone_number,
+        'website': website,
+        'employee_count': employee_count,
+        'revenue': revenue
+    }
+
+
+
+def clean_data(data):
+    # Remove non-breaking spaces and commas from revenue and employee count fields
+    if data['revenue']:
+        data['revenue'] = data['revenue'].replace(' ', '').replace(',', '.')
+    if data['employee_count']:
+        data['employee_count'] = str(data['employee_count']).replace(' ', '')
+
+    # Split the director name field into first and last name
+    if data['director_name']:
+        # Remove the title from the director's name
+        name_without_title = data['director_name'].split(',')[0]
+        names = name_without_title.split(' ')
+        if len(names) >= 2:
+            data['director_first_name'] = names[0]
+            data['director_last_name'] = names[-1]
+        else:
+            data['director_first_name'] = None
+            data['director_last_name'] = None
+
+    del data['director_name']
+    return data
+
+
+def main():
+    with open('/Users/gustassmulkstys/Desktop/github/links.txt.csv', mode='r') as f:
+        company_urls = [line.strip() for line in f]
+
+    print(f'URLs read from the file: {company_urls}')
+
+    with open('company_data999.csv', mode='w', encoding='utf-8', newline='') as csv_file:
+        fieldnames = ['company_name', 'revenue', 'employee_count', 'director_first_name', 'director_last_name', 'website', 'phone_number']
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for url in company_urls:
+            try:
+                html = fetch_page(url)
+                if html:
+                    company_data = parse_company_page(html, url)
+                    print(f'Scraped data for {url}: {company_data}')
+                    clean_company_data = clean_data(company_data)
+                    writer.writerow(clean_company_data)
+            except Exception as e:
+                print(f'Error processing URL {url}: {e}')
+
+if __name__ == '__main__':
+    main()
